@@ -1,0 +1,20 @@
+# Development Dockerfile for React frontend with live reload
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm ci
+
+# Copy source code (will be overridden by volume mount)
+COPY . .
+
+# Expose port
+EXPOSE 3000
+
+# The command will be overridden in docker-compose.dev.yml
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
