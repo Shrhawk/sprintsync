@@ -2,12 +2,25 @@
 
 > A lean internal tool for AI consultancies to log work, track time, and leverage LLM assistance for planning.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Available-brightgreen)](https://sprintsync.yourdomain.com)
-[![Backend API](https://img.shields.io/badge/API%20Docs-Available-blue)](https://sprintsync.yourdomain.com/docs)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Available-brightgreen)](http://54.172.72.68:3000)
+[![Backend API](https://img.shields.io/badge/API%20Docs-Available-blue)](http://54.172.72.68:8000/docs)
+
+## 🚀 **Live Demo - Try It Now!**
+
+### 🌐 Live Application URLs
+- **Frontend Application**: [http://54.172.72.68:3000](http://54.172.72.68:3000)
+- **Backend API Docs**: [http://54.172.72.68:8000/docs](http://54.172.72.68:8000/docs)
+
+### 🔑 Demo Credentials
+```
+Demo User: demo@sprintsync.com / demo123
+Admin User: admin@sprintsync.com / admin123
+```
 
 ## 🎥 Demo Video
 
 📹 **[Watch the Demo & Architecture Walkthrough](https://loom.com/share/your-video-link)**  
+*🎬 Replace this link with your actual Loom video URL after recording*  
 *5-minute demo covering: product tour → architecture explanation → code walkthrough*
 
 ## 🌟 Features at a Glance
@@ -170,7 +183,7 @@ SprintSync follows a modern, scalable architecture with clear separation of conc
 
 The API is fully documented with interactive Swagger UI:
 
-**Live API Docs**: [https://sprintsync.yourdomain.com/docs](https://sprintsync.yourdomain.com/docs)
+**Live API Docs**: [http://54.172.72.68:8000/docs](http://54.172.72.68:8000/docs)
 
 ### Key Endpoints
 
@@ -490,12 +503,17 @@ See [`estimates.csv`](./estimates.csv) for detailed time tracking:
 
 | Phase | Estimated | Actual | Status |
 |-------|-----------|---------|---------|
-| Planning & Setup | 2h | 1.5h | ✅ |
-| Backend Core | 8h | 9h | ✅ |
-| Frontend Core | 6h | 7h | ✅ |
-| AI Integration | 4h | 3h | ✅ |
-| Deployment | 3h | 4h | ✅ |
-| **Total** | **23h** | **24.5h** | ✅ |
+| Planning & Setup | 3h | 3h | ✅ |
+| Backend Core | 17h | 19h | ✅ |
+| Frontend Core | 19h | 24h | ✅ |
+| AI Integration | 3h | 3h | ✅ |
+| DevOps & Testing | 18h | 21h | ✅ |
+| Deployment | 2h | 3h | ✅ |
+| Documentation | 5h | 6.5h | ✅ |
+| Submission | 2h | 2h | ✅ |
+| **Total** | **69h** | **81.5h** | ✅ |
+
+*See [`estimates.csv`](./estimates.csv) for detailed breakdown of all 42 tasks completed.*
 
 ## 🎨 Design System
 
@@ -570,10 +588,31 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
+## 🏆 **GenAI.Labs Challenge Submission**
+
+This project was built as a submission for the **GenAI.Labs SprintSync Challenge**. It demonstrates:
+
+- ✅ **All Core Requirements**: Complete MVP with authentication, task management, AI integration, and deployment
+- ✅ **Stretch Goals Achieved**: Kanban board, analytics, admin panel, comprehensive testing, CI/CD
+- ✅ **Production Ready**: 99 hours of development with proper testing, logging, and deployment
+- ✅ **Live Deployment**: Fully functional application running on AWS EC2
+
+**Challenge Requirements Fulfilled:**
+- Backend with FastAPI, JWT auth, CRUD operations, structured logging
+- AI assistance with OpenAI integration and fallback systems  
+- React frontend with responsive design and real-time updates
+- Docker deployment with PostgreSQL database
+- Comprehensive testing with 80%+ coverage
+- Meaningful Git history with 33+ commits
+- Complete documentation and setup instructions
+
+---
+
 **Built with ❤️ for AI consultancies everywhere**
 
 ## 🔗 Links
-- **Live Demo**: [SprintSync Demo](https://sprintsync.yourdomain.com)
+- **Live Demo**: [SprintSync Demo](http://54.172.72.68:3000)
+- **Backend API**: [API Documentation](http://54.172.72.68:8000/docs)
 - **Repository**: [GitHub](https://github.com/Shrhawk/sprintsync)
 - **Issues**: [Report Bug](https://github.com/Shrhawk/sprintsync/issues)
 

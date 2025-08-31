@@ -1,0 +1,645 @@
+name: Infrastructure & Deployment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+        - deploy
+        - destroy
+
+env:
+  AWS_REGION: us-east-1
+  EC2_INSTANCE_TYPE: t3.small
+  EC2_AMI_ID: ami-0c02fb55956c7d316  # Amazon Linux 2023
+  KEY_PAIR_NAME: sprintsync-dev
+  SECURITY_GROUP_NAME: sprintsync-sg
+  INSTANCE_NAME: sprintsync-instance
+
+jobs:
+  # Backend Tests (same as before)
+  backend-test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sprintsync_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    defaults:
+      run:
+        working-directory: ./backend
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run tests with coverage
+      env:
+        DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/sprintsync_test
+        SECRET_KEY: test-secret-key-for-ci
+        ENVIRONMENT: testing
+      run: |
+        pytest --cov=app --cov-report=xml --cov-report=term-missing
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        flags: backend
+        name: backend-coverage
+
+  # Frontend Build Check
+  frontend-build:
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./frontend
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run linting
+      run: npm run lint
+    
+    - name: Run type checking
+      run: npx tsc --noEmit
+    
+    - name: build frontend
+      run: npm run build
+
+  # AWS Infrastructure Management & Deployment
+  infrastructure-deploy:
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy'))
+    
+    outputs:
+      instance-ip: ${{ steps.get-instance.outputs.instance-ip }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup VPC Infrastructure
+      id: setup-vpc
+      run: |
+        echo "🌐 Setting up VPC infrastructure..."
+        
+        # Check if default VPC exists
+        DEFAULT_VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region ${{ env.AWS_REGION }})
+        
+        if [ "$DEFAULT_VPC_ID" = "None" ] || [ "$DEFAULT_VPC_ID" = "" ]; then
+          echo "📝 No default VPC found, creating one..."
+          aws ec2 create-default-vpc --region ${{ env.AWS_REGION }}
+          
+          # Wait a moment for VPC to be ready
+          sleep 5
+          
+          # Get the new default VPC ID
+          DEFAULT_VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region ${{ env.AWS_REGION }})
+          echo "✅ Created default VPC: $DEFAULT_VPC_ID"
+        else
+          echo "✅ Using existing default VPC: $DEFAULT_VPC_ID"
+        fi
+        
+        # Export VPC ID for subsequent steps
+        echo "vpc-id=$DEFAULT_VPC_ID" >> $GITHUB_OUTPUT
+        
+        # Also check/create internet gateway for default VPC (required for public access)
+        IGW_ID=$(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$DEFAULT_VPC_ID" --query 'InternetGateways[0].InternetGatewayId' --output text --region ${{ env.AWS_REGION }})
+        
+        if [ "$IGW_ID" = "None" ] || [ "$IGW_ID" = "" ]; then
+          echo "📡 Creating internet gateway..."
+          IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text --region ${{ env.AWS_REGION }})
+          aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $DEFAULT_VPC_ID --region ${{ env.AWS_REGION }}
+          echo "✅ Created and attached internet gateway: $IGW_ID"
+        else
+          echo "✅ Internet gateway already exists: $IGW_ID"
+        fi
+
+    - name: Create CloudWatch Log Groups
+      run: |
+        echo "📊 Setting up CloudWatch log groups for SprintSync..."
+        
+        # Create log groups for each service
+        aws logs create-log-group --log-group-name "/sprintsync/dev/frontend" --region ${{ env.AWS_REGION }} || echo "Frontend log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/dev/backend" --region ${{ env.AWS_REGION }} || echo "Backend log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/dev/database" --region ${{ env.AWS_REGION }} || echo "Database log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/dev/docker" --region ${{ env.AWS_REGION }} || echo "Docker log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/dev/system" --region ${{ env.AWS_REGION }} || echo "System log group already exists"
+        
+        # Set retention policy (30 days for dev)
+        aws logs put-retention-policy --log-group-name "/sprintsync/dev/frontend" --retention-in-days 30 || echo "Could not set retention for frontend"
+        aws logs put-retention-policy --log-group-name "/sprintsync/dev/backend" --retention-in-days 30 || echo "Could not set retention for backend"
+        aws logs put-retention-policy --log-group-name "/sprintsync/dev/database" --retention-in-days 30 || echo "Could not set retention for database"
+        aws logs put-retention-policy --log-group-name "/sprintsync/dev/docker" --retention-in-days 30 || echo "Could not set retention for docker"
+        aws logs put-retention-policy --log-group-name "/sprintsync/dev/system" --retention-in-days 30 || echo "Could not set retention for system"
+        
+        echo "✅ CloudWatch log groups configured"
+    
+    - name: Create Security Group
+      run: |
+        VPC_ID="${{ steps.setup-vpc.outputs.vpc-id }}"
+        echo "🔒 Setting up security group in VPC: $VPC_ID"
+        
+        # Check if security group exists (use group-id instead of group-name for VPC)
+        EXISTING_SG=$(aws ec2 describe-security-groups \
+          --filters "Name=group-name,Values=$SECURITY_GROUP_NAME" "Name=vpc-id,Values=$VPC_ID" \
+          --query 'SecurityGroups[0].GroupId' --output text --region ${{ env.AWS_REGION }} 2>/dev/null || echo "None")
+        
+        if [ "$EXISTING_SG" = "None" ] || [ "$EXISTING_SG" = "" ]; then
+          echo "📝 Creating security group in VPC $VPC_ID..."
+          SECURITY_GROUP_ID=$(aws ec2 create-security-group \
+            --group-name $SECURITY_GROUP_NAME \
+            --description "SprintSync application security group" \
+            --vpc-id $VPC_ID \
+            --query 'GroupId' --output text --region ${{ env.AWS_REGION }})
+          
+          echo "✅ Created security group: $SECURITY_GROUP_ID"
+          
+          # Add inbound rules using group-id
+          echo "🔓 Adding inbound rules..."
+          aws ec2 authorize-security-group-ingress \
+            --group-id $SECURITY_GROUP_ID \
+            --protocol tcp --port 80 --cidr 0.0.0.0/0 \
+            --region ${{ env.AWS_REGION }}
+          
+          aws ec2 authorize-security-group-ingress \
+            --group-id $SECURITY_GROUP_ID \
+            --protocol tcp --port 443 --cidr 0.0.0.0/0 \
+            --region ${{ env.AWS_REGION }}
+          
+          aws ec2 authorize-security-group-ingress \
+            --group-id $SECURITY_GROUP_ID \
+            --protocol tcp --port 22 --cidr 0.0.0.0/0 \
+            --region ${{ env.AWS_REGION }}
+          
+          # Also add port 8000 for backend API access
+          aws ec2 authorize-security-group-ingress \
+            --group-id $SECURITY_GROUP_ID \
+            --protocol tcp --port 8000 --cidr 0.0.0.0/0 \
+            --region ${{ env.AWS_REGION }}
+          
+          # Add port 3000 for frontend development server
+          aws ec2 authorize-security-group-ingress \
+            --group-id $SECURITY_GROUP_ID \
+            --protocol tcp --port 3000 --cidr 0.0.0.0/0 \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Security group rules configured"
+        else
+          echo "✅ Security group already exists: $EXISTING_SG"
+        fi
+    
+    - name: Setup SSH Key
+      run: |
+        # Ensure .ssh directory exists
+        mkdir -p ~/.ssh
+        
+        echo "🔑 Setting up SSH key for deployment..."
+        
+        # Check if we have a stored PEM key in GitHub secrets
+        if [ -n "${{ secrets.AWS_PEM_KEY }}" ]; then
+          echo "✅ Using stored PEM key from GitHub secrets"
+          echo "${{ secrets.AWS_PEM_KEY }}" > ~/.ssh/ec2-key.pem
+          chmod 600 ~/.ssh/ec2-key.pem
+          
+          # Verify the key file
+          if [ -f ~/.ssh/ec2-key.pem ]; then
+            KEY_SIZE=$(wc -c < ~/.ssh/ec2-key.pem)
+            echo "✅ SSH key file ready: $KEY_SIZE bytes"
+            
+            # Basic validation - SSH private keys should be at least 1000 bytes
+            if [ $KEY_SIZE -lt 1000 ]; then
+              echo "❌ SSH key file seems too small, might be corrupted"
+              echo "Key content preview:"
+              head -c 200 ~/.ssh/ec2-key.pem
+              exit 1
+            fi
+            
+            # Show key fingerprint for debugging  
+            echo "🔍 Key fingerprint (first 100 chars):"
+            head -c 100 ~/.ssh/ec2-key.pem
+            echo "..."
+          else
+            echo "❌ Failed to create SSH key file"
+            exit 1
+          fi
+          
+        else
+          echo "❌ No AWS_PEM_KEY found in GitHub secrets"
+          echo "💡 Please add your sprintsync-dev.pem key content to GitHub secrets as AWS_PEM_KEY"
+          exit 1
+        fi
+        
+        # Verify the key pair exists in AWS
+        if ! aws ec2 describe-key-pairs --key-names $KEY_PAIR_NAME --region ${{ env.AWS_REGION }} 2>/dev/null; then
+          echo "❌ Key pair '$KEY_PAIR_NAME' not found in AWS"
+          echo "💡 Please ensure you have created the '$KEY_PAIR_NAME' key pair in AWS console"
+          exit 1
+        else
+          echo "✅ Key pair '$KEY_PAIR_NAME' exists in AWS"
+        fi
+    
+    - name: Launch EC2 Instance
+      id: launch-instance
+      run: |
+        VPC_ID="${{ steps.setup-vpc.outputs.vpc-id }}"
+        
+        # Get security group ID by name and VPC
+        SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
+          --filters "Name=group-name,Values=$SECURITY_GROUP_NAME" "Name=vpc-id,Values=$VPC_ID" \
+          --query 'SecurityGroups[0].GroupId' --output text --region ${{ env.AWS_REGION }})
+        
+        echo "🔒 Using security group: $SECURITY_GROUP_ID"
+        
+        # Check if instance already exists and is running
+        EXISTING_INSTANCE_ID=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=running" \
+          --query 'Reservations[0].Instances[0].InstanceId' \
+          --output text --region ${{ env.AWS_REGION }} 2>/dev/null)
+        
+        if [ "$EXISTING_INSTANCE_ID" != "None" ] && [ "$EXISTING_INSTANCE_ID" != "" ] && [ "$EXISTING_INSTANCE_ID" != "null" ]; then
+          # Get the key name for this instance
+          EXISTING_KEY_NAME=$(aws ec2 describe-instances \
+            --instance-ids $EXISTING_INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].KeyName' \
+            --output text --region ${{ env.AWS_REGION }} 2>/dev/null)
+          
+          echo "🔍 Found existing instance: $EXISTING_INSTANCE_ID with key: $EXISTING_KEY_NAME"
+          
+          # Check if the existing instance uses the current key pair name
+          if [ "$EXISTING_KEY_NAME" != "$KEY_PAIR_NAME" ]; then
+            echo "⚠️  Instance uses different key pair ($EXISTING_KEY_NAME vs $KEY_PAIR_NAME)"
+            echo "🔄 Terminating existing instance to launch with correct key..."
+            
+            aws ec2 terminate-instances --instance-ids $EXISTING_INSTANCE_ID --region ${{ env.AWS_REGION }}
+            aws ec2 wait instance-terminated --instance-ids $EXISTING_INSTANCE_ID --region ${{ env.AWS_REGION }}
+            echo "✅ Old instance terminated"
+            
+            # Clear instance ID to force new launch
+            INSTANCE_ID=""
+          else
+            echo "✅ Instance already running with correct key pair: $EXISTING_INSTANCE_ID"
+            INSTANCE_ID="$EXISTING_INSTANCE_ID"
+          fi
+        else
+          echo "🔍 No existing instance found"
+          INSTANCE_ID=""
+        fi
+        
+        # Launch new instance if needed
+        if [ -z "$INSTANCE_ID" ]; then
+          echo "🚀 Launching new EC2 instance in VPC $VPC_ID..."
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --image-id $EC2_AMI_ID \
+            --count 1 \
+            --instance-type $EC2_INSTANCE_TYPE \
+            --key-name $KEY_PAIR_NAME \
+            --security-group-ids $SECURITY_GROUP_ID \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
+            --user-data file://scripts/user-data.sh \
+            --query 'Instances[0].InstanceId' \
+            --output text --region ${{ env.AWS_REGION }})
+          
+          echo "✅ Launched instance: $INSTANCE_ID"
+          
+          echo "⏳ Waiting for instance to be running..."
+          aws ec2 wait instance-running --instance-ids $INSTANCE_ID --region ${{ env.AWS_REGION }}
+          
+          echo "⏳ Waiting for instance to pass status checks..."
+          aws ec2 wait instance-status-ok --instance-ids $INSTANCE_ID --region ${{ env.AWS_REGION }}
+        fi
+        
+        echo "instance-id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+    
+    - name: Get Instance IP
+      id: get-instance
+      run: |
+        INSTANCE_IP=$(aws ec2 describe-instances \
+          --instance-ids ${{ steps.launch-instance.outputs.instance-id }} \
+          --query 'Reservations[0].Instances[0].PublicIpAddress' \
+          --output text)
+        
+        echo "🌐 Instance IP: $INSTANCE_IP"
+        echo "instance-ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+    
+    - name: Wait for SSH to be ready
+      run: |
+        echo "⏳ Waiting for SSH to be available..."
+        INSTANCE_IP="${{ steps.get-instance.outputs.instance-ip }}"
+        
+        # Debug: Show key file info
+        echo "🔍 SSH Key info:"
+        ls -la ~/.ssh/ec2-key.pem
+        echo "Key fingerprint (first 100 chars):"
+        head -c 100 ~/.ssh/ec2-key.pem
+        echo ""
+        
+        # Test SSH connection with retries (reduced since key mismatch is now fixed)
+        for i in {1..15}; do
+          echo "🔍 Attempt $i/15: Testing SSH connection to $INSTANCE_IP"
+          
+          if ssh -i ~/.ssh/ec2-key.pem -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ec2-user@$INSTANCE_IP echo "SSH Ready"; then
+            echo "✅ SSH is ready!"
+            break
+          else
+            SSH_EXIT_CODE=$?
+            echo "❌ SSH failed with exit code: $SSH_EXIT_CODE"
+            
+            # Add some debugging on specific attempts  
+            if [ $i -eq 3 ] || [ $i -eq 8 ] || [ $i -eq 12 ]; then
+              echo "🔍 Debugging SSH connection:"
+              echo "  - Instance IP: $INSTANCE_IP"
+              echo "  - Key file exists: $([ -f ~/.ssh/ec2-key.pem ] && echo 'YES' || echo 'NO')"
+              echo "  - Key file permissions: $(ls -l ~/.ssh/ec2-key.pem | cut -d' ' -f1)"
+              echo "  - Testing instance connectivity:"
+              timeout 5 nc -zv $INSTANCE_IP 22 2>&1 || echo "  - Port 22 not reachable"
+            fi
+            
+            if [ $i -eq 15 ]; then
+              echo "❌ SSH connection failed after 15 attempts"
+              echo "💡 This could be due to:"
+              echo "   - Instance still booting (user-data script running)"
+              echo "   - Security group not allowing SSH (port 22)"
+              echo "   - Wrong SSH key pair"
+              echo "   - Instance networking issues"
+              exit 1
+            fi
+          fi
+          
+          echo "⏳ Waiting 10 seconds before retry..."
+          sleep 10
+        done
+    
+    - name: Deploy Application
+      run: |
+        echo "🚀 Deploying SprintSync to EC2..."
+        
+        # Create deployment archive using staging directory to avoid file changes during tar
+        echo "📁 Creating deployment staging directory..."
+        mkdir -p /tmp/sprintsync-deploy
+        
+        # Copy files to staging directory with exclusions
+        echo "📦 Copying files to staging directory..."
+        rsync -av --progress . /tmp/sprintsync-deploy/ \
+          --exclude='.git/' \
+          --exclude='node_modules/' \
+          --exclude='__pycache__/' \
+          --exclude='.github/' \
+          --exclude='*.tar.gz' \
+          --exclude='.DS_Store' \
+          --exclude='coverage.xml' \
+          --exclude='*.log' \
+          --exclude='.pytest_cache/' \
+          --exclude='.nyc_output/' \
+          --exclude='dist/' \
+          --exclude='build/' \
+          --exclude='.vscode/' \
+          --exclude='.idea/' \
+          --exclude='*.swp' \
+          --exclude='*.swo' \
+          --exclude='*~'
+        
+        # Create archive from staging directory (no file changes during tar)
+        echo "🗜️ Creating deployment archive..."
+        cd /tmp/sprintsync-deploy
+        tar -czf ../deploy.tar.gz .
+        cd -
+        mv /tmp/deploy.tar.gz ./deploy.tar.gz
+        
+        # Cleanup staging directory
+        rm -rf /tmp/sprintsync-deploy
+        
+        # Verify archive was created
+        echo "✅ Deployment archive created: $(ls -lh deploy.tar.gz | awk '{print $5}')"
+        
+        # Copy files to EC2
+        echo "📦 Copying deployment archive to EC2..."
+        scp -i ~/.ssh/ec2-key.pem -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null deploy.tar.gz ec2-user@${{ steps.get-instance.outputs.instance-ip }}:/tmp/
+        
+        # Execute deployment on EC2
+        echo "🔧 Executing deployment commands on EC2..."
+        ssh -i ~/.ssh/ec2-key.pem -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ec2-user@${{ steps.get-instance.outputs.instance-ip }} \
+          "AWS_ACCESS_KEY_ID='${{ secrets.AWS_ACCESS_KEY_ID }}'" \
+          "AWS_SECRET_ACCESS_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}'" \
+          "AWS_REGION='${{ env.AWS_REGION }}'" \
+          "OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}'" \
+          "INSTANCE_IP='${{ steps.get-instance.outputs.instance-ip }}'" \
+          'bash -s' << 'EOF'
+          set -e
+          
+          # Setup deployment directory
+          sudo mkdir -p /opt/sprintsync
+          cd /opt/sprintsync
+          
+          # Extract new version
+          sudo tar -xzf /tmp/deploy.tar.gz --strip-components=1
+          
+          # Configure AWS credentials for CloudWatch logging
+          sudo mkdir -p /root/.aws
+          sudo tee /root/.aws/credentials > /dev/null << AWSEOF
+        [default]
+        aws_access_key_id = ${AWS_ACCESS_KEY_ID}
+        aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
+        AWSEOF
+          
+          sudo tee /root/.aws/config > /dev/null << AWSEOF
+        [default]
+        region = ${AWS_REGION}
+        output = json
+        AWSEOF
+          
+          # Set up environment with CloudWatch configuration
+          sudo tee .env > /dev/null << ENVEOF
+        # SprintSync Development Environment
+        POSTGRES_DB=sprintsync
+        POSTGRES_USER=postgres
+        POSTGRES_PASSWORD=postgres
+        DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/sprintsync
+
+        SECRET_KEY=dev-secret-key-$(openssl rand -hex 16)
+        ENVIRONMENT=development
+        ALLOWED_HOSTS_STR=http://localhost:3000,http://localhost:8000,http://${INSTANCE_IP}
+
+        OPENAI_API_KEY=${OPENAI_API_KEY}
+
+        VITE_API_BASE_URL=http://${INSTANCE_IP}:8000
+
+        # CloudWatch Configuration
+        AWS_REGION=${AWS_REGION}
+        AWS_DEFAULT_REGION=${AWS_REGION}
+        AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+        AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+
+        HOSTNAME=\$(hostname)
+        ENVEOF
+          
+          # Deploy with docker-compose (using dev version with CloudWatch logging)
+          # Use full path to docker-compose since it's installed in /usr/local/bin on Amazon Linux
+          sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml down || true
+          sudo AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+               AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+               AWS_REGION="${AWS_REGION}" \
+               /usr/local/bin/docker-compose -f docker-compose.dev.yml up --build -d
+          
+          echo "⏳ Waiting for services to start..."
+          sleep 30
+          
+          # Health checks
+          echo "🔍 Checking service health..."
+          sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml ps
+          
+          if curl -f http://localhost:3000/ --connect-timeout 10; then
+            echo "✅ Frontend deployment successful!"
+          else
+            echo "⚠️  Frontend health check failed, checking logs..."
+            sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml logs frontend
+          fi
+          
+          if curl -f http://localhost:8000/docs --connect-timeout 10; then
+            echo "✅ Backend deployment successful!"
+          else
+            echo "⚠️  Backend health check failed, checking logs..."
+            sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml logs backend
+          fi
+          
+          echo "📊 CloudWatch logs available at:"
+          echo "  - Frontend: /sprintsync/dev/frontend"
+          echo "  - Backend: /sprintsync/dev/backend" 
+          echo "  - Database: /sprintsync/dev/database"
+          
+        EOF
+    
+    - name: Deployment Summary
+      run: |
+        echo "🎉 SprintSync deployed successfully with CloudWatch logging!"
+        echo "=================================="
+        echo "🔗 Frontend URL: http://${{ steps.get-instance.outputs.instance-ip }}:3000"
+        echo "📚 API Documentation: http://${{ steps.get-instance.outputs.instance-ip }}:8000/docs"
+        echo "📊 Instance ID: ${{ steps.launch-instance.outputs.instance-id }}"
+        echo "🌍 Region: ${{ env.AWS_REGION }}"
+        echo ""
+        echo "📊 CloudWatch Logs:"
+        echo "🔗 Console: https://console.aws.amazon.com/cloudwatch/home?region=${{ env.AWS_REGION }}#logsV2:log-groups"
+        echo "   - Frontend: /sprintsync/dev/frontend"
+        echo "   - Backend: /sprintsync/dev/backend"
+        echo "   - Database: /sprintsync/dev/database"
+        echo "   - System: /sprintsync/dev/system"
+        echo ""
+        echo "🖥️ SSH Access: ssh -i ~/.ssh/ec2-key.pem ec2-user@${{ steps.get-instance.outputs.instance-ip }}"
+        echo "=================================="
+
+  # Infrastructure Cleanup (Manual trigger)
+  infrastructure-destroy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Terminate EC2 Instance
+      run: |
+        INSTANCE_ID=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=$INSTANCE_NAME" \
+          --query 'Reservations[0].Instances[0].InstanceId' \
+          --output text)
+        
+        if [ "$INSTANCE_ID" != "None" ] && [ "$INSTANCE_ID" != "" ]; then
+          echo "🛑 Terminating instance: $INSTANCE_ID"
+          aws ec2 terminate-instances --instance-ids $INSTANCE_ID
+          aws ec2 wait instance-terminated --instance-ids $INSTANCE_ID
+          echo "✅ Instance terminated"
+        else
+          echo "ℹ️ No instance found to terminate"
+        fi
+    
+    - name: Cleanup Security Group
+      run: |
+        # Find security group by name (need to handle VPC context)
+        SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
+          --filters "Name=group-name,Values=$SECURITY_GROUP_NAME" \
+          --query 'SecurityGroups[0].GroupId' --output text --region ${{ env.AWS_REGION }} 2>/dev/null || echo "None")
+        
+        if [ "$SECURITY_GROUP_ID" != "None" ] && [ "$SECURITY_GROUP_ID" != "" ]; then
+          echo "🗑️ Deleting security group: $SECURITY_GROUP_ID"
+          aws ec2 delete-security-group --group-id $SECURITY_GROUP_ID --region ${{ env.AWS_REGION }}
+          echo "✅ Security group deleted"
+        else
+          echo "ℹ️ No security group found to delete"
+        fi
+    
+    - name: Cleanup Key Pair
+      run: |
+        echo "ℹ️ Preserving key pair '$KEY_PAIR_NAME' (managed outside CI)"
+        echo "💡 Key pair is persistent and stored in GitHub secrets"
+        echo "   If you want to delete it, do so manually in AWS console"
+    
+    - name: Cleanup CloudWatch Log Groups (Optional)
+      run: |
+        echo "🗑️ Cleaning up CloudWatch log groups..."
+        # Uncomment the lines below if you want to delete log groups on destroy
+        # (By default, we keep logs for historical purposes)
+        
+        # aws logs delete-log-group --log-group-name "/sprintsync/dev/frontend" --region ${{ env.AWS_REGION }} || echo "Frontend log group not found"
+        # aws logs delete-log-group --log-group-name "/sprintsync/dev/backend" --region ${{ env.AWS_REGION }} || echo "Backend log group not found"  
+        # aws logs delete-log-group --log-group-name "/sprintsync/dev/database" --region ${{ env.AWS_REGION }} || echo "Database log group not found"
+        # aws logs delete-log-group --log-group-name "/sprintsync/dev/docker" --region ${{ env.AWS_REGION }} || echo "Docker log group not found"
+        # aws logs delete-log-group --log-group-name "/sprintsync/dev/system" --region ${{ env.AWS_REGION }} || echo "System log group not found"
+        
+        echo "ℹ️ CloudWatch log groups preserved for historical data"
+        echo "💡 To delete log groups manually, use:"
+        echo "   aws logs delete-log-group --log-group-name /sprintsync/dev/frontend --region ${{ env.AWS_REGION }}"

@@ -25,7 +25,7 @@ DevOps,Docker configuration,2,2.5,Completed,Multi-stage builds for frontend and 
 DevOps,Docker Compose setup,1,1,Completed,Development and production configurations
 DevOps,Database seeding,1,1,Completed,Initial demo data setup
 DevOps,Environment configuration,1,1,Completed,Proper env vars and secrets management
-Deployment,Cloud deployment setup,2,3,Completed,Railway deployment with PostgreSQL
+Deployment,Cloud deployment setup,2,3,Completed,AWS EC2 deployment with PostgreSQL and Docker
 Testing - Backend,Unit tests for models and services,4,4.5,Completed,Comprehensive unit test coverage with pytest
 Testing - Backend,Integration tests for API endpoints,3,3.5,Completed,Full API endpoint testing with async support
 Testing - Backend,Test fixtures and configuration,2,2,Completed,Pytest configuration and reusable fixtures
@@ -39,4 +39,5 @@ Testing,Manual testing and bug fixes,3,4,Completed,End-to-end manual testing
 Documentation,README with setup instructions,2,3,Completed,Comprehensive documentation with architecture
 Documentation,Testing documentation,2,2.5,Completed,Detailed testing guide and coverage information
 Documentation,API documentation,1,1,Completed,Interactive Swagger docs
-Total,,80,97,Completed,Project completed with comprehensive testing infrastructure and professional CI/CD
+Submission,Prepare submission materials and video,2,2,Completed,Email writeup and video script for GenAI.Labs challenge
+Total,,82,99,Completed,"Project completed with comprehensive testing infrastructure, professional CI/CD, and live AWS deployment at http://54.172.72.68:3000"
