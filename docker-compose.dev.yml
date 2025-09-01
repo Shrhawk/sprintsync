@@ -19,13 +19,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    logging:
-      driver: awslogs
-      options:
-        awslogs-group: "/sprintsync/dev/database"
-        awslogs-region: "${AWS_REGION:-us-east-1}"
-        awslogs-stream: "postgres-${HOSTNAME:-dev}"
-        awslogs-create-group: "true"
+
 
   # FastAPI Backend with live reload
   backend:
@@ -49,13 +43,7 @@ services:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
-    logging:
-      driver: awslogs
-      options:
-        awslogs-group: "/sprintsync/dev/backend"
-        awslogs-region: "${AWS_REGION:-us-east-1}"
-        awslogs-stream: "fastapi-${HOSTNAME:-dev}"
-        awslogs-create-group: "true"
+
 
   # React Frontend with live reload
   frontend:
@@ -73,13 +61,7 @@ services:
     depends_on:
       - backend
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
-    logging:
-      driver: awslogs
-      options:
-        awslogs-group: "/sprintsync/dev/frontend"
-        awslogs-region: "${AWS_REGION:-us-east-1}"
-        awslogs-stream: "react-dev-${HOSTNAME:-dev}"
-        awslogs-create-group: "true"
+
 
 volumes:
   postgres_data:

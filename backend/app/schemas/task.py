@@ -14,7 +14,7 @@ from app.models.task import TaskStatus
 class TaskBase(BaseModel):
     """Base task schema"""
     title: str = Field(..., min_length=1, max_length=200)
-    description: Optional[str] = Field(None, max_length=2000)
+    description: Optional[str] = Field(None, max_length=20000)
 
 
 class TaskCreate(TaskBase):
@@ -25,7 +25,7 @@ class TaskCreate(TaskBase):
 class TaskUpdate(BaseModel):
     """Schema for task updates"""
     title: Optional[str] = Field(None, min_length=1, max_length=200)
-    description: Optional[str] = Field(None, max_length=2000)
+    description: Optional[str] = Field(None, max_length=20000)
     status: Optional[TaskStatus] = None
     total_minutes: Optional[int] = Field(None, ge=0)
     assigned_to: Optional[UUID] = None  # For admin task assignment

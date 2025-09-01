@@ -18,6 +18,12 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: "/sprintsync/prod/database"
+        awslogs-region: "${AWS_REGION:-us-east-1}"
+        awslogs-stream-prefix: "postgres"
 
   # FastAPI Backend
   backend:
@@ -30,6 +36,16 @@ services:
       - ENVIRONMENT=production
       - ALLOWED_HOSTS=${ALLOWED_HOSTS}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      # Demo user environment variables for seeding
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sprintsync.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - ADMIN_FULL_NAME=${ADMIN_FULL_NAME:-SprintSync Admin}
+      - DEMO_EMAIL=${DEMO_EMAIL:-demo@sprintsync.com}
+      - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
+      - DEMO_FULL_NAME=${DEMO_FULL_NAME:-Demo User}
     depends_on:
       db:
         condition: service_healthy
@@ -39,6 +55,40 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: "/sprintsync/prod/backend"
+        awslogs-region: "${AWS_REGION:-us-east-1}"
+        awslogs-stream-prefix: "fastapi"
+
+  # Database seeder service - runs once to seed the database
+  seeder:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      # Demo user environment variables for seeding
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sprintsync.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - ADMIN_FULL_NAME=${ADMIN_FULL_NAME:-SprintSync Admin}
+      - DEMO_EMAIL=${DEMO_EMAIL:-demo@sprintsync.com}
+      - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
+      - DEMO_FULL_NAME=${DEMO_FULL_NAME:-Demo User}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.db.seed"]
+    restart: "no"
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: "/sprintsync/prod/seeder"
+        awslogs-region: "${AWS_REGION:-us-east-1}"
+        awslogs-stream-prefix: "seeder"
 
   # React Frontend + Nginx
   frontend:
@@ -58,6 +108,12 @@ services:
       timeout: 3s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: "/sprintsync/prod/frontend"
+        awslogs-region: "${AWS_REGION:-us-east-1}"
+        awslogs-stream-prefix: "nginx"
 
 volumes:
   postgres_data:

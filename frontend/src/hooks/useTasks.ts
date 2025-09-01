@@ -33,8 +33,10 @@ export const useCreateTask = () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       toast.success('Task created!');
     },
-    onError: () => {
-      toast.error('Failed to create task');
+    onError: (error: Error) => {
+      const errorMessage = error.message || 'Failed to create task';
+      console.error('Create task error:', error);
+      toast.error(errorMessage);
     },
   });
 };
@@ -49,8 +51,10 @@ export const useUpdateTask = () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
       toast.success('Task updated!');
     },
-    onError: () => {
-      toast.error('Failed to update task');
+    onError: (error: Error) => {
+      const errorMessage = error.message || 'Failed to update task';
+      console.error('Update task error:', error);
+      toast.error(errorMessage);
     },
   });
 };

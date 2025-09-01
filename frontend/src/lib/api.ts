@@ -132,9 +132,16 @@ class ApiClient {
   }
 
   async createTask(data: CreateTaskData): Promise<Task> {
+    // Transform data for backend compatibility
+    const transformedData = {
+      title: data.title,
+      description: data.description || null,
+      assigned_to: data.assigned_to && data.assigned_to.trim() !== '' ? data.assigned_to : null,
+    };
+
     return this.request<Task>('/tasks', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(transformedData),
     });
   }
 

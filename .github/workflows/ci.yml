@@ -167,23 +167,23 @@ jobs:
 
     - name: Create CloudWatch Log Groups
       run: |
-        echo "📊 Setting up CloudWatch log groups for SprintSync..."
+        echo "📊 Setting up CloudWatch log groups for SprintSync Production..."
         
         # Create log groups for each service
-        aws logs create-log-group --log-group-name "/sprintsync/dev/frontend" --region ${{ env.AWS_REGION }} || echo "Frontend log group already exists"
-        aws logs create-log-group --log-group-name "/sprintsync/dev/backend" --region ${{ env.AWS_REGION }} || echo "Backend log group already exists"
-        aws logs create-log-group --log-group-name "/sprintsync/dev/database" --region ${{ env.AWS_REGION }} || echo "Database log group already exists"
-        aws logs create-log-group --log-group-name "/sprintsync/dev/docker" --region ${{ env.AWS_REGION }} || echo "Docker log group already exists"
-        aws logs create-log-group --log-group-name "/sprintsync/dev/system" --region ${{ env.AWS_REGION }} || echo "System log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/prod/frontend" --region ${{ env.AWS_REGION }} || echo "Frontend log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/prod/backend" --region ${{ env.AWS_REGION }} || echo "Backend log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/prod/database" --region ${{ env.AWS_REGION }} || echo "Database log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/prod/seeder" --region ${{ env.AWS_REGION }} || echo "Seeder log group already exists"
+        aws logs create-log-group --log-group-name "/sprintsync/prod/system" --region ${{ env.AWS_REGION }} || echo "System log group already exists"
         
-        # Set retention policy (30 days for dev)
-        aws logs put-retention-policy --log-group-name "/sprintsync/dev/frontend" --retention-in-days 30 || echo "Could not set retention for frontend"
-        aws logs put-retention-policy --log-group-name "/sprintsync/dev/backend" --retention-in-days 30 || echo "Could not set retention for backend"
-        aws logs put-retention-policy --log-group-name "/sprintsync/dev/database" --retention-in-days 30 || echo "Could not set retention for database"
-        aws logs put-retention-policy --log-group-name "/sprintsync/dev/docker" --retention-in-days 30 || echo "Could not set retention for docker"
-        aws logs put-retention-policy --log-group-name "/sprintsync/dev/system" --retention-in-days 30 || echo "Could not set retention for system"
+        # Set retention policy (90 days for production)
+        aws logs put-retention-policy --log-group-name "/sprintsync/prod/frontend" --retention-in-days 90 || echo "Could not set retention for frontend"
+        aws logs put-retention-policy --log-group-name "/sprintsync/prod/backend" --retention-in-days 90 || echo "Could not set retention for backend"
+        aws logs put-retention-policy --log-group-name "/sprintsync/prod/database" --retention-in-days 90 || echo "Could not set retention for database"
+        aws logs put-retention-policy --log-group-name "/sprintsync/prod/seeder" --retention-in-days 90 || echo "Could not set retention for seeder"
+        aws logs put-retention-policy --log-group-name "/sprintsync/prod/system" --retention-in-days 90 || echo "Could not set retention for system"
         
-        echo "✅ CloudWatch log groups configured"
+        echo "✅ CloudWatch log groups configured for production"
     
     - name: Create Security Group
       run: |
@@ -500,15 +500,15 @@ jobs:
           
           # Set up environment with CloudWatch configuration
           sudo tee .env > /dev/null << ENVEOF
-        # SprintSync Development Environment
+        # SprintSync Production Environment
         POSTGRES_DB=sprintsync
         POSTGRES_USER=postgres
         POSTGRES_PASSWORD=postgres
         DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/sprintsync
 
-        SECRET_KEY=dev-secret-key-$(openssl rand -hex 16)
-        ENVIRONMENT=development
-        ALLOWED_HOSTS_STR=http://localhost:3000,http://localhost:8000,http://${INSTANCE_IP}
+        SECRET_KEY=prod-secret-key-$(openssl rand -hex 32)
+        ENVIRONMENT=production
+        ALLOWED_HOSTS=http://${INSTANCE_IP}:80,http://${INSTANCE_IP},https://${INSTANCE_IP}
 
         OPENAI_API_KEY=${OPENAI_API_KEY}
 
@@ -520,60 +520,78 @@ jobs:
         AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
         AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
 
+        # Demo user configuration for seeding
+        ADMIN_EMAIL=admin@sprintsync.com
+        ADMIN_PASSWORD=admin123
+        ADMIN_FULL_NAME=SprintSync Admin
+        DEMO_EMAIL=demo@sprintsync.com
+        DEMO_PASSWORD=demo123
+        DEMO_FULL_NAME=Demo User
+
         HOSTNAME=\$(hostname)
         ENVEOF
           
-          # Deploy with docker-compose (using dev version with CloudWatch logging)
+          # Deploy with docker-compose (using production version with CloudWatch logging)
           # Use full path to docker-compose since it's installed in /usr/local/bin on Amazon Linux
-          sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml down || true
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml down || true
           sudo AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
                AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
                AWS_REGION="${AWS_REGION}" \
-               /usr/local/bin/docker-compose -f docker-compose.dev.yml up --build -d
+               /usr/local/bin/docker-compose -f docker-compose.prod.yml up --build -d
           
           echo "⏳ Waiting for services to start..."
           sleep 30
           
           # Health checks
           echo "🔍 Checking service health..."
-          sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml ps
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml ps
           
-          if curl -f http://localhost:3000/ --connect-timeout 10; then
+          # Check if seeder completed successfully
+          echo "🌱 Checking database seeding..."
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml logs seeder
+          
+          if curl -f http://localhost/ --connect-timeout 10; then
             echo "✅ Frontend deployment successful!"
           else
             echo "⚠️  Frontend health check failed, checking logs..."
-            sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml logs frontend
+            sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml logs frontend
           fi
           
           if curl -f http://localhost:8000/docs --connect-timeout 10; then
             echo "✅ Backend deployment successful!"
           else
             echo "⚠️  Backend health check failed, checking logs..."
-            sudo /usr/local/bin/docker-compose -f docker-compose.dev.yml logs backend
+            sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml logs backend
           fi
           
           echo "📊 CloudWatch logs available at:"
-          echo "  - Frontend: /sprintsync/dev/frontend"
-          echo "  - Backend: /sprintsync/dev/backend" 
-          echo "  - Database: /sprintsync/dev/database"
+          echo "  - Frontend: /sprintsync/prod/frontend"
+          echo "  - Backend: /sprintsync/prod/backend" 
+          echo "  - Database: /sprintsync/prod/database"
+          echo "  - Seeder: /sprintsync/prod/seeder"
           
         EOF
     
     - name: Deployment Summary
       run: |
-        echo "🎉 SprintSync deployed successfully with CloudWatch logging!"
+        echo "🎉 SprintSync deployed successfully with CloudWatch logging and database seeding!"
         echo "=================================="
-        echo "🔗 Frontend URL: http://${{ steps.get-instance.outputs.instance-ip }}:3000"
+        echo "🔗 Frontend URL: http://${{ steps.get-instance.outputs.instance-ip }}"
         echo "📚 API Documentation: http://${{ steps.get-instance.outputs.instance-ip }}:8000/docs"
         echo "📊 Instance ID: ${{ steps.launch-instance.outputs.instance-id }}"
         echo "🌍 Region: ${{ env.AWS_REGION }}"
         echo ""
+        echo "👤 Demo Credentials:"
+        echo "   Admin: admin@sprintsync.com / admin123"
+        echo "   Demo User: demo@sprintsync.com / demo123"
+        echo ""
         echo "📊 CloudWatch Logs:"
         echo "🔗 Console: https://console.aws.amazon.com/cloudwatch/home?region=${{ env.AWS_REGION }}#logsV2:log-groups"
-        echo "   - Frontend: /sprintsync/dev/frontend"
-        echo "   - Backend: /sprintsync/dev/backend"
-        echo "   - Database: /sprintsync/dev/database"
-        echo "   - System: /sprintsync/dev/system"
+        echo "   - Frontend: /sprintsync/prod/frontend"
+        echo "   - Backend: /sprintsync/prod/backend"
+        echo "   - Database: /sprintsync/prod/database"
+        echo "   - Seeder: /sprintsync/prod/seeder"
+        echo "   - System: /sprintsync/prod/system"
         echo ""
         echo "🖥️ SSH Access: ssh -i ~/.ssh/ec2-key.pem ec2-user@${{ steps.get-instance.outputs.instance-ip }}"
         echo "=================================="
@@ -634,12 +652,12 @@ jobs:
         # Uncomment the lines below if you want to delete log groups on destroy
         # (By default, we keep logs for historical purposes)
         
-        # aws logs delete-log-group --log-group-name "/sprintsync/dev/frontend" --region ${{ env.AWS_REGION }} || echo "Frontend log group not found"
-        # aws logs delete-log-group --log-group-name "/sprintsync/dev/backend" --region ${{ env.AWS_REGION }} || echo "Backend log group not found"  
-        # aws logs delete-log-group --log-group-name "/sprintsync/dev/database" --region ${{ env.AWS_REGION }} || echo "Database log group not found"
-        # aws logs delete-log-group --log-group-name "/sprintsync/dev/docker" --region ${{ env.AWS_REGION }} || echo "Docker log group not found"
-        # aws logs delete-log-group --log-group-name "/sprintsync/dev/system" --region ${{ env.AWS_REGION }} || echo "System log group not found"
+        # aws logs delete-log-group --log-group-name "/sprintsync/prod/frontend" --region ${{ env.AWS_REGION }} || echo "Frontend log group not found"
+        # aws logs delete-log-group --log-group-name "/sprintsync/prod/backend" --region ${{ env.AWS_REGION }} || echo "Backend log group not found"  
+        # aws logs delete-log-group --log-group-name "/sprintsync/prod/database" --region ${{ env.AWS_REGION }} || echo "Database log group not found"
+        # aws logs delete-log-group --log-group-name "/sprintsync/prod/seeder" --region ${{ env.AWS_REGION }} || echo "Seeder log group not found"
+        # aws logs delete-log-group --log-group-name "/sprintsync/prod/system" --region ${{ env.AWS_REGION }} || echo "System log group not found"
         
         echo "ℹ️ CloudWatch log groups preserved for historical data"
         echo "💡 To delete log groups manually, use:"
-        echo "   aws logs delete-log-group --log-group-name /sprintsync/dev/frontend --region ${{ env.AWS_REGION }}"
+        echo "   aws logs delete-log-group --log-group-name /sprintsync/prod/frontend --region ${{ env.AWS_REGION }}"

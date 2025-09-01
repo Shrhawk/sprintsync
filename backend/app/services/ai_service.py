@@ -23,7 +23,6 @@ class AIService:
     async def suggest_task_description(self, title: str, context: Optional[str] = None) -> AISuggestionResponse:
         if not self.client:
             return self._fallback_task_description(title)
-        
         try:
             # TODO: maybe make this prompt configurable
             prompt = f"""Create a task description for: "{title}"
@@ -43,7 +42,7 @@ Max 500 words."""
             )
             
             suggestion = resp.choices[0].message.content.strip()
-            # logger.info("generated task description", title=title)
+            logger.info("generated task description", title=title)
             
             return AISuggestionResponse(
                 suggestion=suggestion,
