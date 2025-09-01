@@ -6,7 +6,7 @@ __pycache__
 *.pyd
 .Python
 env
-.env
+# .env - Allow CI-created .env files to be copied into Docker image
 .venv
 venv/
 .git

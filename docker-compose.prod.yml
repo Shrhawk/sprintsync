@@ -1,19 +1,17 @@
 # Docker Compose for SprintSync production
 
-version: '3.8'
-
 services:
   # PostgreSQL Database
   db:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-sprintsync}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,24 +19,50 @@ services:
     logging:
       driver: awslogs
       options:
-        awslogs-group: "/sprintsync/prod/database"
-        awslogs-region: "${AWS_REGION:-us-east-1}"
-        awslogs-stream-prefix: "postgres"
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /sprintsync/prod/database
+        awslogs-stream: postgres
+
+  # Database migrations - runs before everything else
+  migrator:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/sprintsync}
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /sprintsync/prod/system
+        awslogs-stream: alembic
 
   # FastAPI Backend
   backend:
     build: 
       context: ./backend
       dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - SECRET_KEY=${SECRET_KEY}
-      - ENVIRONMENT=production
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - AWS_REGION=${AWS_REGION}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/sprintsync}
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - ALLOWED_HOSTS_STR=${ALLOWED_HOSTS_STR:-http://54.172.72.68:80,http://54.172.72.68,https://54.172.72.68,http://54.172.72.68:8000}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       # Demo user environment variables for seeding
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sprintsync.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
@@ -47,10 +71,12 @@ services:
       - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
       - DEMO_FULL_NAME=${DEMO_FULL_NAME:-Demo User}
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -58,9 +84,9 @@ services:
     logging:
       driver: awslogs
       options:
-        awslogs-group: "/sprintsync/prod/backend"
-        awslogs-region: "${AWS_REGION:-us-east-1}"
-        awslogs-stream-prefix: "fastapi"
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /sprintsync/prod/backend
+        awslogs-stream: fastapi
 
   # Database seeder service - runs once to seed the database
   seeder:
@@ -68,9 +94,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - SECRET_KEY=${SECRET_KEY}
-      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/sprintsync}
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       # Demo user environment variables for seeding
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@sprintsync.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
@@ -79,6 +108,8 @@ services:
       - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
       - DEMO_FULL_NAME=${DEMO_FULL_NAME:-Demo User}
     depends_on:
+      migrator:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
     command: ["python", "-m", "app.db.seed"]
@@ -86,22 +117,29 @@ services:
     logging:
       driver: awslogs
       options:
-        awslogs-group: "/sprintsync/prod/seeder"
-        awslogs-region: "${AWS_REGION:-us-east-1}"
-        awslogs-stream-prefix: "seeder"
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /sprintsync/prod/seeder
+        awslogs-stream: seed
 
   # React Frontend + Nginx
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_DEMO_EMAIL: ${DEMO_EMAIL:-demo@sprintsync.com}
+        VITE_DEMO_PASSWORD: ${DEMO_PASSWORD:-demo123}
+        VITE_ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@sprintsync.com}
+        VITE_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
     ports:
       - "80:80"
       - "443:443"
     environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL}
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
       interval: 30s
@@ -111,9 +149,9 @@ services:
     logging:
       driver: awslogs
       options:
-        awslogs-group: "/sprintsync/prod/frontend"
-        awslogs-region: "${AWS_REGION:-us-east-1}"
-        awslogs-stream-prefix: "nginx"
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: /sprintsync/prod/frontend
+        awslogs-stream: nginx
 
 volumes:
   postgres_data:

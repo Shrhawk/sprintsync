@@ -87,7 +87,18 @@ const Kanban: React.FC = () => {
     if (!over) return;
 
     const taskId = active.id as string;
-    const newStatus = over.id as TaskStatus;
+    let newStatus: TaskStatus;
+
+    // Check if dropped on a column (TaskStatus) or another task (UUID)
+    if (Object.values(TaskStatus).includes(over.id as TaskStatus)) {
+      // Dropped on a column
+      newStatus = over.id as TaskStatus;
+    } else {
+      // Dropped on another task - find which column that task belongs to
+      const targetTask = tasks?.find((t: Task) => t.id === over.id);
+      if (!targetTask) return;
+      newStatus = targetTask.status;
+    }
 
     const task = tasks?.find((t: Task) => t.id === taskId);
     if (!task || task.status === newStatus) return;

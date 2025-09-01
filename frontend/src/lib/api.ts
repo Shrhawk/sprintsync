@@ -14,7 +14,7 @@ import type {
 } from '../types';
 
 // Base API configuration
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 class ApiClient {
   private baseURL: string;
@@ -161,8 +161,8 @@ class ApiClient {
 
   async addTimeToTask(id: string, minutes: number): Promise<Task> {
     return this.request<Task>(`/tasks/${id}/time`, {
-      method: 'POST',
-      body: JSON.stringify({ minutes }),
+      method: 'PATCH',
+      body: JSON.stringify({ minutes_to_add: minutes }),
     });
   }
 
@@ -174,7 +174,7 @@ class ApiClient {
 
   // Admin endpoints for all tasks
   async getAllTasks(): Promise<Task[]> {
-    return this.request<Task[]>('/admin/tasks');
+    return this.request<Task[]>('/tasks/admin/all');
   }
 
   // User management endpoints

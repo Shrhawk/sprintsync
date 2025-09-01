@@ -5,6 +5,19 @@ FROM node:20-alpine as builder
 
 WORKDIR /app
 
+# Accept build arguments for environment variables
+ARG VITE_API_BASE_URL=http://localhost:8000
+ARG VITE_DEMO_EMAIL=demo@sprintsync.com
+ARG VITE_DEMO_PASSWORD=demo123
+ARG VITE_ADMIN_EMAIL=admin@sprintsync.com
+ARG VITE_ADMIN_PASSWORD=admin123
+
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_DEMO_EMAIL=$VITE_DEMO_EMAIL
+ENV VITE_DEMO_PASSWORD=$VITE_DEMO_PASSWORD
+ENV VITE_ADMIN_EMAIL=$VITE_ADMIN_EMAIL
+ENV VITE_ADMIN_PASSWORD=$VITE_ADMIN_PASSWORD
+
 # Copy package files
 COPY package*.json ./
 
@@ -14,7 +27,7 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the application with environment variables
 RUN npm run build
 
 # Production stage - serve with nginx

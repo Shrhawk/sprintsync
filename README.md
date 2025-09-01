@@ -17,12 +17,6 @@ Demo User: demo@sprintsync.com / demo123
 Admin User: admin@sprintsync.com / admin123
 ```
 
-## 🎥 Demo Video
-
-📹 **[Watch the Demo & Architecture Walkthrough](https://loom.com/share/your-video-link)**  
-*🎬 Replace this link with your actual Loom video URL after recording*  
-*5-minute demo covering: product tour → architecture explanation → code walkthrough*
-
 ## 🌟 Features at a Glance
 
 - ✅ **Smart Task Management** - Full CRUD operations with status tracking (Todo → In Progress → Done)
@@ -41,7 +35,7 @@ Admin User: admin@sprintsync.com / admin123
 
 ```bash
 # Clone and setup
-git clone https://github.com/yourusername/sprintsync.git
+git clone https://github.com/Shrhawk/sprintsync.git
 cd sprintsync
 
 # Start development environment with live reload
@@ -286,12 +280,36 @@ CREATE TABLE tasks (
 #### Manual Deployment
 
 ```bash
+# Setup CloudWatch logging (one-time setup)
+./scripts/setup-cloudwatch-logs.sh
+
 # Build for production
 docker-compose -f docker-compose.prod.yml up --build
 
 # Or deploy to cloud platform
 git push origin main  # Triggers auto-deployment
 ```
+
+### CloudWatch Logging
+
+All production containers automatically send logs to AWS CloudWatch:
+
+```bash
+# Setup CloudWatch log groups (run once)
+./scripts/setup-cloudwatch-logs.sh
+
+# View logs in real-time
+aws logs tail /sprintsync/backend --region us-east-1 --follow
+aws logs tail /sprintsync/frontend --region us-east-1 --follow
+aws logs tail /sprintsync/database --region us-east-1 --follow
+```
+
+**Log Groups Created:**
+- `/sprintsync/database` - PostgreSQL logs (30 days retention)
+- `/sprintsync/migrator` - Database migration logs (7 days retention)
+- `/sprintsync/backend` - FastAPI application logs (30 days retention)
+- `/sprintsync/seeder` - Database seeding logs (7 days retention)
+- `/sprintsync/frontend` - Nginx/React logs (30 days retention)
 
 ## 🔍 Observability & Monitoring
 
@@ -399,26 +417,6 @@ frontend/src/test/
     └── useTasks.test.ts    # Task management hooks
 ```
 
-#### Running Frontend Tests
-```bash
-cd frontend
-npm install
-
-# Run all tests
-npm run test
-
-# Run with UI (interactive)
-npm run test:ui
-
-# Run with coverage
-npm run test:coverage
-
-# Run tests once (CI mode)
-npm run test:run
-
-# View coverage report
-open coverage/index.html
-```
 
 #### Test Features
 - **React Testing Library**: Best practices for component testing

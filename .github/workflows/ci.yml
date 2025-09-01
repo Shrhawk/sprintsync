@@ -499,44 +499,75 @@ jobs:
         AWSEOF
           
           # Set up environment with CloudWatch configuration
-          sudo tee .env > /dev/null << ENVEOF
+          # Create .env file with proper variable substitution
+          cat > .env.temp << 'ENVEOF'
         # SprintSync Production Environment
         POSTGRES_DB=sprintsync
         POSTGRES_USER=postgres
         POSTGRES_PASSWORD=postgres
         DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/sprintsync
 
-        SECRET_KEY=prod-secret-key-$(openssl rand -hex 32)
+        SECRET_KEY=prod-secret-key-RANDOM_SECRET
         ENVIRONMENT=production
-        ALLOWED_HOSTS=http://${INSTANCE_IP}:80,http://${INSTANCE_IP},https://${INSTANCE_IP}
+        ALLOWED_HOSTS_STR=http://INSTANCE_IP_PLACEHOLDER:80,http://INSTANCE_IP_PLACEHOLDER,https://INSTANCE_IP_PLACEHOLDER
 
-        OPENAI_API_KEY=${OPENAI_API_KEY}
+        OPENAI_API_KEY=OPENAI_KEY_PLACEHOLDER
 
-        VITE_API_BASE_URL=http://${INSTANCE_IP}:8000
+        VITE_API_BASE_URL=http://INSTANCE_IP_PLACEHOLDER:8000
 
         # CloudWatch Configuration
-        AWS_REGION=${AWS_REGION}
-        AWS_DEFAULT_REGION=${AWS_REGION}
-        AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-        AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+        AWS_REGION=AWS_REGION_PLACEHOLDER
+        AWS_DEFAULT_REGION=AWS_REGION_PLACEHOLDER
+        AWS_ACCESS_KEY_ID=AWS_ACCESS_KEY_PLACEHOLDER
+        AWS_SECRET_ACCESS_KEY=AWS_SECRET_KEY_PLACEHOLDER
 
         # Demo user configuration for seeding
         ADMIN_EMAIL=admin@sprintsync.com
         ADMIN_PASSWORD=admin123
-        ADMIN_FULL_NAME=SprintSync Admin
+        ADMIN_FULL_NAME="SprintSync Admin"
         DEMO_EMAIL=demo@sprintsync.com
         DEMO_PASSWORD=demo123
-        DEMO_FULL_NAME=Demo User
+        DEMO_FULL_NAME="Demo User"
 
-        HOSTNAME=\$(hostname)
+        HOSTNAME=$(hostname)
         ENVEOF
+          
+          # Substitute placeholders with actual values
+          sed -i "s/INSTANCE_IP_PLACEHOLDER/${INSTANCE_IP}/g" .env.temp
+          sed -i "s/OPENAI_KEY_PLACEHOLDER/${OPENAI_API_KEY}/g" .env.temp
+          sed -i "s/AWS_REGION_PLACEHOLDER/${AWS_REGION}/g" .env.temp
+          sed -i "s/AWS_ACCESS_KEY_PLACEHOLDER/${AWS_ACCESS_KEY_ID}/g" .env.temp
+          sed -i "s/AWS_SECRET_KEY_PLACEHOLDER/${AWS_SECRET_ACCESS_KEY}/g" .env.temp
+          sed -i "s/RANDOM_SECRET/$(openssl rand -hex 32)/g" .env.temp
+          
+          # Move to final location with sudo
+          sudo mv .env.temp .env
           
           # Deploy with docker-compose (using production version with CloudWatch logging)
           # Use full path to docker-compose since it's installed in /usr/local/bin on Amazon Linux
           sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml down || true
-          sudo AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+          
+          # Load environment variables from .env file explicitly
+          set -a
+          source .env
+          set +a
+          
+          sudo -E AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
                AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
                AWS_REGION="${AWS_REGION}" \
+               ADMIN_EMAIL="${ADMIN_EMAIL}" \
+               ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+               ADMIN_FULL_NAME="${ADMIN_FULL_NAME}" \
+               DEMO_EMAIL="${DEMO_EMAIL}" \
+               DEMO_PASSWORD="${DEMO_PASSWORD}" \
+               DEMO_FULL_NAME="${DEMO_FULL_NAME}" \
+               SECRET_KEY="${SECRET_KEY}" \
+               OPENAI_API_KEY="${OPENAI_API_KEY}" \
+               POSTGRES_DB="${POSTGRES_DB}" \
+               POSTGRES_USER="${POSTGRES_USER}" \
+               POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+               DATABASE_URL="${DATABASE_URL}" \
+               ENVIRONMENT="${ENVIRONMENT}" \
                /usr/local/bin/docker-compose -f docker-compose.prod.yml up --build -d
           
           echo "⏳ Waiting for services to start..."
@@ -546,9 +577,25 @@ jobs:
           echo "🔍 Checking service health..."
           sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml ps
           
+          echo "📋 Checking migrator logs..."
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml logs migrator
+          
           # Check if seeder completed successfully
           echo "🌱 Checking database seeding..."
           sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml logs seeder
+          
+          # Additional debugging - check if environment variables are being passed correctly
+          echo "🔍 Debugging environment variables in containers..."
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml exec -T backend printenv | grep -E "(ADMIN_|DEMO_|DATABASE_|SECRET_)" || echo "Backend not running yet"
+          
+          # Check database connection directly
+          echo "🔍 Testing database connection..."
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml exec -T db psql -U postgres -d sprintsync -c "SELECT version();" || echo "Database connection failed"
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml exec -T db psql -U postgres -d sprintsync -c "\dt" || echo "Table listing failed"
+          
+          # Check if alembic version table exists
+          echo "🔍 Checking migration status..."
+          sudo /usr/local/bin/docker-compose -f docker-compose.prod.yml exec -T db psql -U postgres -d sprintsync -c "SELECT version_num FROM alembic_version;" || echo "No alembic version found"
           
           if curl -f http://localhost/ --connect-timeout 10; then
             echo "✅ Frontend deployment successful!"

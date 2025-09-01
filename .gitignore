@@ -84,7 +84,6 @@ htmlcov/
 .mypy_cache/
 
 # Alembic - ignore migration files except .gitkeep
-backend/alembic/versions/*
 !backend/alembic/versions/.gitkeep
 
 # Environment example files are tracked

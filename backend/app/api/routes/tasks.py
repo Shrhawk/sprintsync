@@ -121,9 +121,12 @@ async def update_task(
     if not task:
         raise HTTPException(404, "Task not found")
     
-    # simple field update
+    # Handle UUID fields that need string conversion  
     for field, value in task_update.model_dump(exclude_unset=True).items():
-        setattr(task, field, value)
+        if field == 'assigned_to' and value is not None:
+            setattr(task, field, str(value))
+        else:
+            setattr(task, field, value)
     
     await db.commit()
     await db.refresh(task)
@@ -163,7 +166,7 @@ async def add_time_to_task(
     
     result = await db.execute(
         select(Task).where(
-            and_(Task.id == task_id, Task.user_id == current_user.id)
+            and_(Task.id == str(task_id), Task.user_id == str(current_user.id))
         )
     )
     task = result.scalar_one_or_none()

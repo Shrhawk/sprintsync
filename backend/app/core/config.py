@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     ALGORITHM: str = "HS256"
     
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost/sprintsync"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost/sprintsync"  # Will be overridden by env var
     
     # cors hosts
     ALLOWED_HOSTS_STR: str = "http://localhost:3000,http://localhost:8000"
@@ -28,11 +28,11 @@ class Settings(BaseSettings):
     
     # default users
     ADMIN_EMAIL: str = "admin@sprintsync.com"
-    ADMIN_PASSWORD: str = "CHANGE_ADMIN_PASSWORD"
+    ADMIN_PASSWORD: str = "admin123"
     ADMIN_FULL_NAME: str = "Admin User"
     
     DEMO_EMAIL: str = "demo@sprintsync.com"
-    DEMO_PASSWORD: str = "CHANGE_DEMO_PASSWORD"
+    DEMO_PASSWORD: str = "demo123"
     DEMO_FULL_NAME: str = "Demo User"
     
     @computed_field

@@ -35,6 +35,9 @@ COPY --from=builder /root/.local /home/appuser/.local
 # Copy application code
 COPY . .
 
+# Copy .env file if it exists (created by CI/CD)
+# Note: .env is now allowed in .dockerignore for CI-created files
+
 # Fix permissions
 RUN chown -R appuser:appuser /app
 USER appuser

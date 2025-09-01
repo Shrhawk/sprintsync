@@ -162,8 +162,8 @@ const LoginForm: React.FC = () => {
                       type="button"
                       onClick={() => {
                         onSubmit({
-                          email: 'demo@sprintsync.com',
-                          password: 'CHANGE_DEMO_PASSWORD'
+                          email: import.meta.env.VITE_DEMO_EMAIL || 'demo@sprintsync.com',
+                          password: import.meta.env.VITE_DEMO_PASSWORD || 'demo123'
                         });
                       }}
                       className="btn-outline group relative overflow-hidden"
@@ -177,8 +177,8 @@ const LoginForm: React.FC = () => {
                       type="button"
                       onClick={() => {
                         onSubmit({
-                          email: 'admin@sprintsync.com',
-                          password: 'CHANGE_ADMIN_PASSWORD'
+                          email: import.meta.env.VITE_ADMIN_EMAIL || 'admin@sprintsync.com',
+                          password: import.meta.env.VITE_ADMIN_PASSWORD || 'admin123'
                         });
                       }}
                       className="btn-outline group relative overflow-hidden"

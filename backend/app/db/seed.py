@@ -4,7 +4,7 @@ Database seeding script for SprintSync demo data
 
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.db.database import AsyncSessionLocal, engine
 from app.models import Base, User, Task, TaskStatus
@@ -140,9 +140,50 @@ async def create_demo_tasks(db: AsyncSession, admin_user: User, demo_user: User)
     print(f"Created {len(demo_tasks)} tasks for demo user")
 
 
+async def check_tables_exist(db: AsyncSession) -> bool:
+    """Check if required tables exist"""
+    try:
+        # Check if tables exist by querying information schema
+        result = await db.execute(text("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name IN ('users', 'tasks', 'alembic_version')
+        """))
+        tables = [row[0] for row in result.fetchall()]
+        
+        print(f"📋 Found tables: {tables}")
+        
+        # Check if all required tables exist
+        required_tables = {'users', 'tasks', 'alembic_version'}
+        missing_tables = required_tables - set(tables)
+        
+        if missing_tables:
+            print(f"❌ Missing tables: {missing_tables}")
+            return False
+            
+        # Also test that we can actually query the tables
+        await db.execute(text("SELECT 1 FROM users LIMIT 1"))
+        await db.execute(text("SELECT 1 FROM tasks LIMIT 1"))
+        print("✅ Tables exist and are queryable")
+        return True
+    except Exception as e:
+        print(f"❌ Table check failed: {e}")
+        return False
+
+
 async def seed_database():
     """Main seeding function"""
     print("🌱 Seeding database with demo data...")
+    
+    # Debug environment variables
+    print(f"🔍 Environment debug info:")
+    print(f"   DATABASE_URL: {settings.DATABASE_URL}")
+    print(f"   ENVIRONMENT: {settings.ENVIRONMENT}")
+    print(f"   ADMIN_EMAIL: {settings.ADMIN_EMAIL}")
+    print(f"   ADMIN_PASSWORD: {'***' if settings.ADMIN_PASSWORD else 'NOT SET'}")
+    print(f"   DEMO_EMAIL: {settings.DEMO_EMAIL}")
+    print(f"   DEMO_PASSWORD: {'***' if settings.DEMO_PASSWORD else 'NOT SET'}")
     
     # Tables should already be created via Alembic migrations
     # async with engine.begin() as conn:
@@ -152,6 +193,21 @@ async def seed_database():
     # Create session
     async with AsyncSessionLocal() as db:
         try:
+            # Check if tables exist first
+            tables_exist = await check_tables_exist(db)
+            if not tables_exist:
+                print("❌ Database tables do not exist!")
+                print("💡 Make sure migrations have been run with: alembic upgrade head")
+                print("🔄 Waiting 10 seconds for migrations to complete...")
+                await asyncio.sleep(10)
+                
+                # Try again after waiting
+                tables_exist = await check_tables_exist(db)
+                if not tables_exist:
+                    raise Exception("Database tables still do not exist after waiting. Please run migrations first.")
+            
+            print("✅ Database tables verified")
+            
             # Create demo users
             admin_user, demo_user = await create_demo_users(db)
             
