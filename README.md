@@ -2,13 +2,13 @@
 
 > A lean internal tool for AI consultancies to log work, track time, and leverage LLM assistance for planning.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Available-brightgreen)](http://54.172.72.68:3000)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Available-brightgreen)](http://54.172.72.68)
 [![Backend API](https://img.shields.io/badge/API%20Docs-Available-blue)](http://54.172.72.68:8000/docs)
 
 ## 🚀 **Live Demo - Try It Now!**
 
 ### 🌐 Live Application URLs
-- **Frontend Application**: [http://54.172.72.68:3000](http://54.172.72.68:3000)
+- **Frontend Application**: [http://54.172.72.68:3000](http://54.172.72.68)
 - **Backend API Docs**: [http://54.172.72.68:8000/docs](http://54.172.72.68:8000/docs)
 
 ### 🔑 Demo Credentials
