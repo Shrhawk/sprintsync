@@ -8,7 +8,7 @@
 ## 🚀 **Live Demo - Try It Now!**
 
 ### 🌐 Live Application URLs
-- **Frontend Application**: [http://54.172.72.68:3000](http://54.172.72.68)
+- **Frontend Application**: [http://54.172.72.68](http://54.172.72.68)
 - **Backend API Docs**: [http://54.172.72.68:8000/docs](http://54.172.72.68:8000/docs)
 
 ### 🔑 Demo Credentials
